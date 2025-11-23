@@ -156,7 +156,7 @@ jobs:
         if: steps.maybe_skip.outputs.skip != 'true'
         uses: softprops/action-gh-release@v2
         with:
-          name: ast-grep MCP (Swift) v${{ steps.vars.outputs.version }}
+          name: ast-grep-mcp-swift v${{ steps.vars.outputs.version }}
           tag_name: ${{ steps.vars.outputs.raw_tag }}
           generate_release_notes: true
           draft: false
