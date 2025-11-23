@@ -140,12 +140,27 @@ private func formatMatchesAsText(_ matches: [[String: Any]]) -> String {
         let range = match["range"] as? [String: Any]
         let start = ((range?["start"] as? [String: Any])?["line"] as? Int ?? 0) + 1
         let end = ((range?["end"] as? [String: Any])?["line"] as? Int ?? 0) + 1
-        let text = (match["text"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        let text = trimTrailingWhitespace(match["text"] as? String ?? "")
         let header = start == end ? "\(file):\(start)" : "\(file):\(start)-\(end)"
         return "\(header)\n\(text)"
     }
 
     return blocks.joined(separator: "\n\n")
+}
+
+private func trimTrailingWhitespace(_ text: String) -> String {
+    var result = text
+    while let last = result.unicodeScalars.last, CharacterSet.whitespacesAndNewlines.contains(last) {
+        result.removeLast()
+    }
+    return result
+}
+
+private func jsonResourceContent(_ value: Any) throws -> Tool.Content {
+    let data = try JSONSerialization.data(withJSONObject: value, options: [.prettyPrinted, .sortedKeys])
+    let base64 = data.base64EncodedString()
+    let text = String(decoding: data, as: UTF8.self)
+    return .resource(uri: "data:application/json;base64,\(base64)", mimeType: "application/json", text: text)
 }
 
 private func getSupportedLanguages(configPath: String?) -> [String] {
@@ -233,8 +248,8 @@ private func testMatchCodeRuleTool(_ args: [String: Value]?, configPath: String?
         throw MCPError.internalError("No matches found for the given code and rule. Try adding `stopBy: end` to inside/has rules.")
     }
 
-    let json = try encodeJSON(matches)
-    return .init(content: [.text(json)], isError: false)
+    let content = try jsonResourceContent(matches)
+    return .init(content: [content], isError: false)
 }
 
 private func findCodeTool(_ args: [String: Value]?, configPath: String?) throws -> CallTool.Result {
@@ -278,8 +293,8 @@ private func findCodeTool(_ args: [String: Value]?, configPath: String?) throws 
         }
         return .init(content: [.text("\(header):\n\n\(text)")], isError: false)
     } else {
-        let json = try encodeJSON(matches)
-        return .init(content: [.text(json)], isError: false)
+        let content = try jsonResourceContent(matches)
+        return .init(content: [content], isError: false)
     }
 }
 
@@ -318,8 +333,8 @@ private func findCodeByRuleTool(_ args: [String: Value]?, configPath: String?) t
         }
         return .init(content: [.text("\(header):\n\n\(text)")], isError: false)
     } else {
-        let json = try encodeJSON(matches)
-        return .init(content: [.text(json)], isError: false)
+        let content = try jsonResourceContent(matches)
+        return .init(content: [content], isError: false)
     }
 }
 
