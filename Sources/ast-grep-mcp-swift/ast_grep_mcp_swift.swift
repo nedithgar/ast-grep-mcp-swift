@@ -3,6 +3,8 @@ import ArgumentParser
 import MCP
 import Yams
 
+private let version = "0.1.0"
+
 private func resolveConfigPath(cliConfig: String?) throws -> String? {
     if let cliConfig {
         guard FileManager.default.fileExists(atPath: cliConfig) else {
@@ -446,7 +448,7 @@ struct AstGrepMCPServer: AsyncParsableCommand {
 
         let server = Server(
             name: "ast-grep",
-            version: "0.1.0",
+            version: version,
             instructions: "Expose ast-grep CLI tools over MCP",
             capabilities: .init(tools: .init(listChanged: true))
         )
