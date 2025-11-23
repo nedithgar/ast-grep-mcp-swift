@@ -53,6 +53,22 @@ swift run ast-grep-mcp-swift --config /absolute/path/to/sgconfig.yaml
 
 You can omit `--config` if you rely on defaults or the `AST_GREP_CONFIG` environment variable.
 
+### Quick local test
+
+1) Ensure `ast-grep` is on PATH: `ast-grep --version`
+2) Build once: `swift build`
+3) Run the server (stdio): `swift run ast-grep-mcp-swift`
+4) From an MCP-capable client, call `tools/list` and then `tools/call` with one of the tools below.
+
+### Using a prebuilt release (macOS)
+
+1) Go to [Releases](https://github.com/ast-grep/ast-grep-mcp-swift/releases) and download the asset named `ast-grep-mcp-swift-vX.Y.Z-macOS-universal` plus its `.sha256`.
+2) Verify checksum (optional but recommended): `shasum -a 256 -c ast-grep-mcp-swift-vX.Y.Z-macOS-universal.sha256`
+3) Make it executable: `chmod +x ast-grep-mcp-swift-vX.Y.Z-macOS-universal`
+4) Run: `./ast-grep-mcp-swift-vX.Y.Z-macOS-universal --config /absolute/path/to/sgconfig.yaml`
+   - Or move it into your PATH (e.g., `/usr/local/bin/ast-grep-mcp-swift`).
+5) Point your MCP client to that binary (see Cursor/Claude examples below).
+
 ## Configuration
 
 ### For Cursor

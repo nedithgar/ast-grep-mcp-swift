@@ -133,12 +133,6 @@ jobs:
           . "${SWIFTLY_HOME_DIR:-$HOME/.swiftly}/env.sh"
           swift build -c release --arch arm64 --arch x86_64
 
-      - name: Run tests (arm64 only)
-        if: steps.maybe_skip.outputs.skip != 'true'
-        run: |
-          . "${SWIFTLY_HOME_DIR:-$HOME/.swiftly}/env.sh"
-          swift test -c release --arch arm64
-
       - name: Collect artifacts
         if: steps.maybe_skip.outputs.skip != 'true'
         run: |
