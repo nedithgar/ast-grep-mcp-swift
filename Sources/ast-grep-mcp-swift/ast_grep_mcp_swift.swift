@@ -3,7 +3,7 @@ import ArgumentParser
 import MCP
 import Yams
 
-private let version = "0.1.0"
+private let version = "0.1.1"
 enum DebugContext {
     @TaskLocal static var enabled = false
 }
