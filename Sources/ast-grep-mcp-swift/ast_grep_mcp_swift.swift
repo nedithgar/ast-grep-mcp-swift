@@ -82,16 +82,15 @@ final class OutputBuffer: @unchecked Sendable {
     private var data = Data()
 
     func append(_ chunk: Data) {
-        lock.lock()
-        data.append(chunk)
-        lock.unlock()
+        lock.withLock {
+            data.append(chunk)
+        }
     }
 
     func snapshot() -> Data {
-        lock.lock()
-        let copy = data
-        lock.unlock()
-        return copy
+        lock.withLock {
+            data
+        }
     }
 }
 
