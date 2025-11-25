@@ -131,6 +131,8 @@ jobs:
         if: steps.maybe_skip.outputs.skip != 'true'
         run: |
           . "${SWIFTLY_HOME_DIR:-$HOME/.swiftly}/env.sh"
+          # Clean module cache to avoid stale PCM files when SDK/toolchain versions change
+          rm -rf .build/apple/ModuleCache.noindex
           swift build -c release --arch arm64 --arch x86_64
 
       - name: Collect artifacts
