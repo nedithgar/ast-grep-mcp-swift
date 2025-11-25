@@ -94,6 +94,21 @@ final class OutputBuffer: @unchecked Sendable {
     }
 }
 
+/// Thread-safe helper to ensure a completion handler is called exactly once.
+final class OnceFlag: @unchecked Sendable {
+    private let lock = NSLock()
+    private var completed = false
+
+    /// Executes the given closure only on the first call; subsequent calls are no-ops.
+    func callOnce(_ action: () -> Void) {
+        lock.withLock {
+            guard !completed else { return }
+            completed = true
+            action()
+        }
+    }
+}
+
 private func runCommand(_ args: [String], input: String? = nil) throws -> CommandResult {
     let process = Process()
     process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
@@ -117,12 +132,17 @@ private func runCommand(_ args: [String], input: String? = nil) throws -> Comman
     let stderrBuffer = OutputBuffer()
 
     let group = DispatchGroup()
+    let stdoutOnce = OnceFlag()
+    let stderrOnce = OnceFlag()
+
     group.enter()
     stdoutPipe.fileHandleForReading.readabilityHandler = { handle in
         let data = handle.availableData
         if data.isEmpty {
-            handle.readabilityHandler = nil
-            group.leave()
+            stdoutOnce.callOnce {
+                handle.readabilityHandler = nil
+                group.leave()
+            }
             return
         }
         stdoutBuffer.append(data)
@@ -132,8 +152,10 @@ private func runCommand(_ args: [String], input: String? = nil) throws -> Comman
     stderrPipe.fileHandleForReading.readabilityHandler = { handle in
         let data = handle.availableData
         if data.isEmpty {
-            handle.readabilityHandler = nil
-            group.leave()
+            stderrOnce.callOnce {
+                handle.readabilityHandler = nil
+                group.leave()
+            }
             return
         }
         stderrBuffer.append(data)
