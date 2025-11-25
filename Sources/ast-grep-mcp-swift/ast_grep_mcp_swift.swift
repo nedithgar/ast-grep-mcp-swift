@@ -321,8 +321,8 @@ private func testMatchCodeRuleTool(_ args: [String: Value]?, configPath: String?
         throw MCPError.internalError("No matches found for the given code and rule. Try adding `stopBy: end` to inside/has rules.")
     }
 
-    let content = try jsonResourceContent(matches)
-    return .init(content: [content], isError: false)
+    let jsonText = try encodeJSON(matches)
+    return .init(content: [.text(jsonText)], isError: false)
 }
 
 private func findCodeTool(_ args: [String: Value]?, configPath: String?) throws -> CallTool.Result {
