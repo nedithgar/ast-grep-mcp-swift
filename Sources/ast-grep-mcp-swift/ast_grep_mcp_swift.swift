@@ -514,13 +514,21 @@ struct AstGrepMCPServer: AsyncParsableCommand {
         discussion: "Environment: AST_GREP_CONFIG path to sgconfig.yaml (overridden by --config)"
     )
 
-    @Flag(name: [.short, .long, .customLong("debug")], help: "Print verbose debug logs to stderr")
+    @Flag(name: [.long, .customLong("debug")], help: "Print verbose debug logs to stderr")
     var verbose = false
+
+    @Flag(name: [.short, .customLong("version")], help: "Print version information")
+    var showVersion = false
 
     @Option(name: .long, help: "Path to sgconfig.yaml file for customizing ast-grep behavior")
     var config: String?
 
     mutating func run() async throws {
+        if showVersion {
+            print("ast-grep-mcp-swift \(version)")
+            return
+        }
+
         try await DebugContext.$enabled.withValue(verbose) {
             if verbose {
                 debugLog { "Verbose debug logging enabled" }
