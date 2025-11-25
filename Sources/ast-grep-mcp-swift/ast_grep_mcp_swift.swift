@@ -514,7 +514,7 @@ struct AstGrepMCPServer: AsyncParsableCommand {
         discussion: "Environment: AST_GREP_CONFIG path to sgconfig.yaml (overridden by --config)"
     )
 
-    @Flag(name: [.long, .customLong("debug")], help: "Print verbose debug logs to stderr")
+    @Flag(name: .long, help: "Print verbose debug logs to stderr")
     var verbose = false
 
     @Flag(name: [.short, .customLong("version")], help: "Print version information")
