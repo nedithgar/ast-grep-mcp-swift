@@ -76,6 +76,25 @@ private struct CommandResult {
     let stderr: String
 }
 
+/// Thread-safe accumulator for pipe output.
+final class OutputBuffer: @unchecked Sendable {
+    private let lock = NSLock()
+    private var data = Data()
+
+    func append(_ chunk: Data) {
+        lock.lock()
+        data.append(chunk)
+        lock.unlock()
+    }
+
+    func snapshot() -> Data {
+        lock.lock()
+        let copy = data
+        lock.unlock()
+        return copy
+    }
+}
+
 private func runCommand(_ args: [String], input: String? = nil) throws -> CommandResult {
     let process = Process()
     process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
@@ -94,6 +113,32 @@ private func runCommand(_ args: [String], input: String? = nil) throws -> Comman
     let stderrPipe = Pipe()
     process.standardOutput = stdoutPipe
     process.standardError = stderrPipe
+
+    let stdoutBuffer = OutputBuffer()
+    let stderrBuffer = OutputBuffer()
+
+    let group = DispatchGroup()
+    group.enter()
+    stdoutPipe.fileHandleForReading.readabilityHandler = { handle in
+        let data = handle.availableData
+        if data.isEmpty {
+            handle.readabilityHandler = nil
+            group.leave()
+            return
+        }
+        stdoutBuffer.append(data)
+    }
+
+    group.enter()
+    stderrPipe.fileHandleForReading.readabilityHandler = { handle in
+        let data = handle.availableData
+        if data.isEmpty {
+            handle.readabilityHandler = nil
+            group.leave()
+            return
+        }
+        stderrBuffer.append(data)
+    }
 
     var stdinPipe: Pipe?
     if input != nil {
@@ -114,12 +159,10 @@ private func runCommand(_ args: [String], input: String? = nil) throws -> Comman
     }
 
     process.waitUntilExit()
+    group.wait()
 
-    let stdoutData = stdoutPipe.fileHandleForReading.readDataToEndOfFile()
-    let stderrData = stderrPipe.fileHandleForReading.readDataToEndOfFile()
-
-    let stdout = String(decoding: stdoutData, as: UTF8.self)
-    let stderr = String(decoding: stderrData, as: UTF8.self)
+    let stdout = String(decoding: stdoutBuffer.snapshot(), as: UTF8.self)
+    let stderr = String(decoding: stderrBuffer.snapshot(), as: UTF8.self)
 
     debugLog { "Command exit status: \(process.terminationStatus)" }
     if !stdout.isEmpty {
