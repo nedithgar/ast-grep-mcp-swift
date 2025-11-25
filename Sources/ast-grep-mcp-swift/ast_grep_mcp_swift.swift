@@ -4,6 +4,16 @@ import MCP
 import Yams
 
 private let version = "0.1.0"
+enum DebugContext {
+    @TaskLocal static var enabled = false
+}
+
+private func debugLog(_ message: () -> String) {
+    guard DebugContext.enabled else { return }
+    if let data = ("[debug] " + message() + "\n").data(using: .utf8) {
+        FileHandle.standardError.write(data)
+    }
+}
 
 private func resolveConfigPath(cliConfig: String?) throws -> String? {
     if let cliConfig {
@@ -71,6 +81,15 @@ private func runCommand(_ args: [String], input: String? = nil) throws -> Comman
     process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
     process.arguments = args
 
+    debugLog {
+        var parts = ["Executing command:"]
+        parts.append(args.joined(separator: " "))
+        if input != nil {
+            parts.append("(stdin provided)")
+        }
+        return parts.joined(separator: " ")
+    }
+
     let stdoutPipe = Pipe()
     let stderrPipe = Pipe()
     process.standardOutput = stdoutPipe
@@ -102,6 +121,14 @@ private func runCommand(_ args: [String], input: String? = nil) throws -> Comman
     let stdout = String(decoding: stdoutData, as: UTF8.self)
     let stderr = String(decoding: stderrData, as: UTF8.self)
 
+    debugLog { "Command exit status: \(process.terminationStatus)" }
+    if !stdout.isEmpty {
+        debugLog { "stdout (first 200 chars): \(stdout.prefix(200))" }
+    }
+    if !stderr.isEmpty {
+        debugLog { "stderr (first 200 chars): \(stderr.prefix(200))" }
+    }
+
     if process.terminationStatus != 0 {
         let message = stderr.trimmingCharacters(in: .whitespacesAndNewlines)
         throw MCPError.internalError("Command \(args.joined(separator: " ")) failed with exit code \(process.terminationStatus): \(message.isEmpty ? "(no error output)" : message)")
@@ -116,6 +143,7 @@ private func runAstGrep(configPath: String?, subcommand: String, args: [String],
         fullArgs += ["--config", configPath]
     }
     fullArgs += args
+    debugLog { "ast-grep command args: \(fullArgs.joined(separator: " "))" }
     return try runCommand(fullArgs, input: input)
 }
 
@@ -405,11 +433,16 @@ private func buildTools(languages: [String]) -> [Tool] {
 
 private func registerHandlers(server: Server, languages: [String], configPath: String?) async {
     await server.withMethodHandler(ListTools.self) { _ in
-        .init(tools: buildTools(languages: languages))
+        debugLog { "Handling list_tools" }
+        return .init(tools: buildTools(languages: languages))
     }
 
     await server.withMethodHandler(CallTool.self) { params in
         do {
+            debugLog {
+                let keys = params.arguments?.keys.joined(separator: ", ") ?? "<none>"
+                return "Handling tool call: \(params.name) (args: \(keys))"
+            }
             switch params.name {
             case "dump_syntax_tree":
                 return try dumpSyntaxTreeTool(params.arguments, languages: languages, configPath: configPath)
@@ -439,24 +472,35 @@ struct AstGrepMCPServer: AsyncParsableCommand {
         discussion: "Environment: AST_GREP_CONFIG path to sgconfig.yaml (overridden by --config)"
     )
 
+    @Flag(name: [.short, .long, .customLong("debug")], help: "Print verbose debug logs to stderr")
+    var verbose = false
+
     @Option(name: .long, help: "Path to sgconfig.yaml file for customizing ast-grep behavior")
     var config: String?
 
     mutating func run() async throws {
-        let configPath = try resolveConfigPath(cliConfig: config)
-        let languages = getSupportedLanguages(configPath: configPath)
+        try await DebugContext.$enabled.withValue(verbose) {
+            if verbose {
+                debugLog { "Verbose debug logging enabled" }
+            }
 
-        let server = Server(
-            name: "ast-grep",
-            version: version,
-            instructions: "Expose ast-grep CLI tools over MCP",
-            capabilities: .init(tools: .init(listChanged: true))
-        )
+            let configPath = try resolveConfigPath(cliConfig: config)
+            debugLog { "Using config path: \(configPath ?? "<none>")" }
+            let languages = getSupportedLanguages(configPath: configPath)
+            debugLog { "Loaded supported languages: \(languages.joined(separator: ", "))" }
 
-        await registerHandlers(server: server, languages: languages, configPath: configPath)
+            let server = Server(
+                name: "ast-grep",
+                version: version,
+                instructions: "Expose ast-grep CLI tools over MCP",
+                capabilities: .init(tools: .init(listChanged: true))
+            )
 
-        let transport = StdioTransport()
-        try await server.start(transport: transport)
-        await server.waitUntilCompleted()
+            await registerHandlers(server: server, languages: languages, configPath: configPath)
+
+            let transport = StdioTransport()
+            try await server.start(transport: transport)
+            await server.waitUntilCompleted()
+        }
     }
 }
