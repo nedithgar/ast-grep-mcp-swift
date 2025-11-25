@@ -342,6 +342,8 @@ private func testMatchCodeRuleTool(_ args: [String: Value]?, configPath: String?
         throw MCPError.internalError("No matches found for the given code and rule. Try adding `stopBy: end` to inside/has rules.")
     }
 
+    // Note: Use plain text JSON here instead of jsonResourceContent to avoid
+    // "TypeError: Cannot read properties of undefined (reading 'uri')" in some MCP clients.
     let jsonText = try encodeJSON(matches)
     return .init(content: [.text(jsonText)], isError: false)
 }
