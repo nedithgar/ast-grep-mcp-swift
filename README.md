@@ -49,6 +49,8 @@ Launch the MCP server over stdio:
 
 ```bash
 swift run ast-grep-mcp-swift --config /absolute/path/to/sgconfig.yaml
+swift run ast-grep-mcp-swift --verbose --config /absolute/path/to/sgconfig.yaml  # verbose debug logs to stderr
+swift run ast-grep-mcp-swift --version  # print version information
 ```
 
 You can omit `--config` if you rely on defaults or the `AST_GREP_CONFIG` environment variable.

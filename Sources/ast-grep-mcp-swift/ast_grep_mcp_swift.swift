@@ -4,6 +4,16 @@ import MCP
 import Yams
 
 private let version = "0.1.0"
+enum DebugContext {
+    @TaskLocal static var enabled = false
+}
+
+private func debugLog(_ message: () -> String) {
+    guard DebugContext.enabled else { return }
+    if let data = ("[debug] " + message() + "\n").data(using: .utf8) {
+        FileHandle.standardError.write(data)
+    }
+}
 
 private func resolveConfigPath(cliConfig: String?) throws -> String? {
     if let cliConfig {
@@ -66,15 +76,90 @@ private struct CommandResult {
     let stderr: String
 }
 
+/// Thread-safe accumulator for pipe output.
+final class OutputBuffer: @unchecked Sendable {
+    private let lock = NSLock()
+    private var data = Data()
+
+    func append(_ chunk: Data) {
+        lock.withLock {
+            data.append(chunk)
+        }
+    }
+
+    func snapshot() -> Data {
+        lock.withLock {
+            data
+        }
+    }
+}
+
+/// Thread-safe helper to ensure a completion handler is called exactly once.
+final class OnceFlag: @unchecked Sendable {
+    private let lock = NSLock()
+    private var completed = false
+
+    /// Executes the given closure only on the first call; subsequent calls are no-ops.
+    func callOnce(_ action: () -> Void) {
+        lock.withLock {
+            guard !completed else { return }
+            completed = true
+            action()
+        }
+    }
+}
+
 private func runCommand(_ args: [String], input: String? = nil) throws -> CommandResult {
     let process = Process()
     process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
     process.arguments = args
 
+    debugLog {
+        var parts = ["Executing command:"]
+        parts.append(args.joined(separator: " "))
+        if input != nil {
+            parts.append("(stdin provided)")
+        }
+        return parts.joined(separator: " ")
+    }
+
     let stdoutPipe = Pipe()
     let stderrPipe = Pipe()
     process.standardOutput = stdoutPipe
     process.standardError = stderrPipe
+
+    let stdoutBuffer = OutputBuffer()
+    let stderrBuffer = OutputBuffer()
+
+    let group = DispatchGroup()
+    let stdoutOnce = OnceFlag()
+    let stderrOnce = OnceFlag()
+
+    group.enter()
+    stdoutPipe.fileHandleForReading.readabilityHandler = { handle in
+        let data = handle.availableData
+        if data.isEmpty {
+            stdoutOnce.callOnce {
+                handle.readabilityHandler = nil
+                group.leave()
+            }
+            return
+        }
+        stdoutBuffer.append(data)
+    }
+
+    group.enter()
+    stderrPipe.fileHandleForReading.readabilityHandler = { handle in
+        let data = handle.availableData
+        if data.isEmpty {
+            stderrOnce.callOnce {
+                handle.readabilityHandler = nil
+                group.leave()
+            }
+            return
+        }
+        stderrBuffer.append(data)
+    }
 
     var stdinPipe: Pipe?
     if input != nil {
@@ -95,12 +180,18 @@ private func runCommand(_ args: [String], input: String? = nil) throws -> Comman
     }
 
     process.waitUntilExit()
+    group.wait()
 
-    let stdoutData = stdoutPipe.fileHandleForReading.readDataToEndOfFile()
-    let stderrData = stderrPipe.fileHandleForReading.readDataToEndOfFile()
+    let stdout = String(decoding: stdoutBuffer.snapshot(), as: UTF8.self)
+    let stderr = String(decoding: stderrBuffer.snapshot(), as: UTF8.self)
 
-    let stdout = String(decoding: stdoutData, as: UTF8.self)
-    let stderr = String(decoding: stderrData, as: UTF8.self)
+    debugLog { "Command exit status: \(process.terminationStatus)" }
+    if !stdout.isEmpty {
+        debugLog { "stdout (first 200 chars): \(stdout.prefix(200))" }
+    }
+    if !stderr.isEmpty {
+        debugLog { "stderr (first 200 chars): \(stderr.prefix(200))" }
+    }
 
     if process.terminationStatus != 0 {
         let message = stderr.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -116,6 +207,7 @@ private func runAstGrep(configPath: String?, subcommand: String, args: [String],
         fullArgs += ["--config", configPath]
     }
     fullArgs += args
+    debugLog { "ast-grep command args: \(fullArgs.joined(separator: " "))" }
     return try runCommand(fullArgs, input: input)
 }
 
@@ -250,8 +342,10 @@ private func testMatchCodeRuleTool(_ args: [String: Value]?, configPath: String?
         throw MCPError.internalError("No matches found for the given code and rule. Try adding `stopBy: end` to inside/has rules.")
     }
 
-    let content = try jsonResourceContent(matches)
-    return .init(content: [content], isError: false)
+    // Note: Use plain text JSON here instead of jsonResourceContent to avoid
+    // "TypeError: Cannot read properties of undefined (reading 'uri')" in some MCP clients.
+    let jsonText = try encodeJSON(matches)
+    return .init(content: [.text(jsonText)], isError: false)
 }
 
 private func findCodeTool(_ args: [String: Value]?, configPath: String?) throws -> CallTool.Result {
@@ -405,11 +499,16 @@ private func buildTools(languages: [String]) -> [Tool] {
 
 private func registerHandlers(server: Server, languages: [String], configPath: String?) async {
     await server.withMethodHandler(ListTools.self) { _ in
-        .init(tools: buildTools(languages: languages))
+        debugLog { "Handling list_tools" }
+        return .init(tools: buildTools(languages: languages))
     }
 
     await server.withMethodHandler(CallTool.self) { params in
         do {
+            debugLog {
+                let keys = params.arguments?.keys.joined(separator: ", ") ?? "<none>"
+                return "Handling tool call: \(params.name) (args: \(keys))"
+            }
             switch params.name {
             case "dump_syntax_tree":
                 return try dumpSyntaxTreeTool(params.arguments, languages: languages, configPath: configPath)
@@ -439,24 +538,43 @@ struct AstGrepMCPServer: AsyncParsableCommand {
         discussion: "Environment: AST_GREP_CONFIG path to sgconfig.yaml (overridden by --config)"
     )
 
+    @Flag(name: .long, help: "Print verbose debug logs to stderr")
+    var verbose = false
+
+    @Flag(name: [.short, .customLong("version")], help: "Print version information")
+    var showVersion = false
+
     @Option(name: .long, help: "Path to sgconfig.yaml file for customizing ast-grep behavior")
     var config: String?
 
     mutating func run() async throws {
-        let configPath = try resolveConfigPath(cliConfig: config)
-        let languages = getSupportedLanguages(configPath: configPath)
+        if showVersion {
+            print("ast-grep-mcp-swift \(version)")
+            return
+        }
 
-        let server = Server(
-            name: "ast-grep",
-            version: version,
-            instructions: "Expose ast-grep CLI tools over MCP",
-            capabilities: .init(tools: .init(listChanged: true))
-        )
+        try await DebugContext.$enabled.withValue(verbose) {
+            if verbose {
+                debugLog { "Verbose debug logging enabled" }
+            }
 
-        await registerHandlers(server: server, languages: languages, configPath: configPath)
+            let configPath = try resolveConfigPath(cliConfig: config)
+            debugLog { "Using config path: \(configPath ?? "<none>")" }
+            let languages = getSupportedLanguages(configPath: configPath)
+            debugLog { "Loaded supported languages: \(languages.joined(separator: ", "))" }
 
-        let transport = StdioTransport()
-        try await server.start(transport: transport)
-        await server.waitUntilCompleted()
+            let server = Server(
+                name: "ast-grep",
+                version: version,
+                instructions: "Expose ast-grep CLI tools over MCP",
+                capabilities: .init(tools: .init(listChanged: true))
+            )
+
+            await registerHandlers(server: server, languages: languages, configPath: configPath)
+
+            let transport = StdioTransport()
+            try await server.start(transport: transport)
+            await server.waitUntilCompleted()
+        }
     }
 }

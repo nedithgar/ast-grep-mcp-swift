@@ -31,5 +31,6 @@ let package = Package(
             name: "ast-grep-mcp-swiftTests",
             dependencies: ["ast-grep-mcp-swift"]
         ),
-    ]
+    ],
+    swiftLanguageModes: [.v6]
 )
